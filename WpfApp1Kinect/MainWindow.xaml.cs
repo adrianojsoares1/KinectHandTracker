@@ -14,9 +14,7 @@ namespace WpfApp1Kinect
         #region Declarations
         KinectSensor sensor = null;
 
-        ColorFrameReader colorReader = null;
-
-        BodyFrameReader bodyReader = null;
+        MultiSourceFrameReader reader;
 
         Body[] bodies = null;
 
@@ -28,8 +26,7 @@ namespace WpfApp1Kinect
         { 
             InitializeComponent();
             Loaded += Window_Loaded;
-            Closed += Window_Closed;
-            
+            Closed += Window_Closed;  
         }
         
         //Performed when Window has finished loading
@@ -43,12 +40,9 @@ namespace WpfApp1Kinect
                 sensor.Open();
 
                 //Call the body reader. Every Reader must have a .FrameArrived method.
-                bodyReader = sensor.BodyFrameSource.OpenReader();
-                bodyReader.FrameArrived += BodyReader_FrameArrived;
-
-                //Call the color reader
-                colorReader = sensor.ColorFrameSource.OpenReader();
-                colorReader.FrameArrived += ColorReader_FrameArrived;
+                reader = sensor.OpenMultiSourceFrameReader(FrameSourceTypes.Body | FrameSourceTypes.Color);
+                reader.MultiSourceFrameArrived += Reader_MultiSourceFrameArrived;
+                
 
 
             }
@@ -58,10 +52,8 @@ namespace WpfApp1Kinect
         private void Window_Closed(object sender, EventArgs e)
         {
             //Close all instances of IDisposable<> objects
-            if (colorReader != null)
-                colorReader.Dispose();
-            if (bodyReader != null)
-                bodyReader.Dispose();
+            if (reader != null)
+                reader.Dispose();
             if (sensor != null)
                 sensor.Close();
         }
@@ -69,43 +61,57 @@ namespace WpfApp1Kinect
 
         #region FrameArrived
 
-        //Display the camera image of the person to the screen.
-        private void ColorReader_FrameArrived(object sender, ColorFrameArrivedEventArgs e)
+        //Find the body, and track hand movements.
+        private void Reader_MultiSourceFrameArrived(object sender, MultiSourceFrameArrivedEventArgs e)
         {
-            using (var frame = e.FrameReference.AcquireFrame())
+            MultiSourceFrame refer = e.FrameReference.AcquireFrame();
+
+            bool dataRecieved = false;
+
+            canvas.Children.Clear();
+            using (ColorFrame frame = refer.ColorFrameReference.AcquireFrame())
             {
                 if (frame != null)
                 {
                     camera.Source = ToBitmap(frame);
+                    canvas.Children.Add(camera);
                 }
             }
-        }
-
-        //Find the body, and track hand movements.
-        private void BodyReader_FrameArrived(object sender, BodyFrameArrivedEventArgs e)
-        {
-            bool dataRecieved = false;
-            using (BodyFrame bFrame = e.FrameReference.AcquireFrame())
+            using (BodyFrame bFrame = refer.BodyFrameReference.AcquireFrame())
             {
                 if (bFrame != null)
                 {
                     bodies = new Body[bFrame.BodyCount];
                     bFrame.GetAndRefreshBodyData(bodies);
-                    dataRecieved = true;
+                    if(bodies.Length > 0)
+                        dataRecieved = true;
                 }
                 if(dataRecieved)
                 {
+                    bool bodyFound = false;
+                    Body bodyInFocus = bodies[0];
+                    float closestDepth = float.MaxValue;
+
                     foreach(Body b in bodies)
                     {
                         if (b.IsTracked)
                         {
+                            bodyFound = true;
+
                             IReadOnlyDictionary<JointType, Joint> joints = b.Joints;
 
+                            if (joints[JointType.SpineBase].Position.Z < closestDepth)
+                            {
+                                closestDepth = joints[JointType.SpineBase].Position.Z;
+                                bodyInFocus = b;
+                            }
+                            else continue;
+                                
                             Joint handLeft = joints[JointType.HandLeft];
                             Joint handRight = joints[JointType.HandRight];
 
-                            Point lhPoint = DrawHand(LeftHand, handLeft, sensor.CoordinateMapper);
-                            Point rhPoint = DrawHand(RightHand, handRight, sensor.CoordinateMapper);
+                            Point lhPoint = DrawJointMarker(handLeft, 50, sensor.CoordinateMapper);
+                            Point rhPoint = DrawJointMarker(handRight, 50, sensor.CoordinateMapper);
 
                             string rhs = getHandState(b.HandRightState);
                             string lhs = getHandState(b.HandLeftState);
@@ -116,19 +122,29 @@ namespace WpfApp1Kinect
                             Joint thumbRight = joints[JointType.ThumbRight];
                             Joint thumbLeft = joints[JointType.ThumbLeft];
 
-                            Point rtPoint = DrawThumb(RightThumb, thumbRight, sensor.CoordinateMapper);
-                            Point ltPoint = DrawThumb(LeftThumb, thumbLeft, sensor.CoordinateMapper);
+                            Point rtPoint = DrawJointMarker(thumbRight, 20, sensor.CoordinateMapper);
+                            Point ltPoint = DrawJointMarker(thumbLeft, 20, sensor.CoordinateMapper);
 
                             ThumbsInfo.Text = "THUMBS \n" + "R: (" + rtPoint.X.ToString("#.#") + ", " + rtPoint.Y.ToString("#.#") + ")\n" +
                                               "L: (" + ltPoint.X.ToString("#.#") + ", " + ltPoint.Y.ToString("#.#") + ")";
 
+                            BodiesInFocus.Text = "BODY ID \n" + bodyInFocus.TrackingId;
+
                         }
+                        if (!bodyFound)
+                        {
+                            BodiesInFocus.Text = "BODIES \nNONE!";
+                            RHInfo.Text = "RIGHT HAND \nNONE!";
+                            LHInfo.Text = "LEFT HAND \nNONE!";
+                            ThumbsInfo.Text = "THUMBS\nNONE!";
+                        }
+                            
                     }
                 }
             }
             
             
-        }
+        } 
 
         #endregion
         
@@ -177,28 +193,25 @@ namespace WpfApp1Kinect
         }
         
         //Generic Drawing Function for hand or thumb.
-        private static Point DrawLimb(Ellipse ellipse, Joint hand, CoordinateMapper map)
+        private Point DrawJointMarker(Joint joint, int diameter, CoordinateMapper map)
         {
-            if (hand.TrackingState == TrackingState.NotTracked) return new Point();
+            if (joint.TrackingState == TrackingState.NotTracked) return new Point();
 
-            Point point = Scale(hand, map);
+            Point point = Scale(joint, map);
+
+            Ellipse ellipse = new Ellipse
+            { 
+                //Using Auto-Implemented Properties 
+                Width = diameter,
+                Height = diameter,
+                Fill = new SolidColorBrush(Colors.DarkRed)
+            };   
 
             Canvas.SetLeft(ellipse, point.X - ellipse.Width / 2);
             Canvas.SetTop(ellipse, point.Y - ellipse.Height / 2);
+            canvas.Children.Add(ellipse);
 
             return point;
-        }
-
-        //Wrapper Function, draws circle around the thumb.
-        public static Point DrawThumb(Ellipse ellipse, Joint thumb, CoordinateMapper map)
-        {
-           return DrawLimb(ellipse, thumb, map);
-        }
-
-        //Wrapper Function, draws circle around the hand.
-        public static Point DrawHand(Ellipse ellipse, Joint hand, CoordinateMapper map)
-        {
-            return DrawLimb(ellipse, hand, map);
         }
 
         //Return the pixel XY coordinate of a Joint using CoordinateMapper
@@ -208,10 +221,10 @@ namespace WpfApp1Kinect
 
             ColorSpacePoint cPoint = map.MapCameraPointToColorSpace(joint.Position);
 
-            if (double.IsInfinity(cPoint.X)) point.X = 0;
+            if (Double.IsInfinity(cPoint.X)) point.X = 0;
             else point.X = cPoint.X;
 
-            if (double.IsInfinity(cPoint.Y)) point.Y = 0;
+            if (Double.IsInfinity(cPoint.Y)) point.Y = 0;
             else point.Y = cPoint.Y;
 
             return point;
