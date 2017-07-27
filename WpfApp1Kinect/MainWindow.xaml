@@ -21,16 +21,16 @@
                     </Grid.RowDefinitions>
 
                     <Border BorderThickness="1" Grid.Row="3" BorderBrush="Black">
-                        <TextBlock Name="ThumbsInfo" Grid.Row="2" FontSize="40" TextAlignment="Center">THUMBS</TextBlock>
+                        <TextBlock Name="ThumbsInfo" Grid.Row="2" FontSize="30" TextAlignment="Center"></TextBlock>
                     </Border>
                     <Border BorderThickness="1" Grid.Row="1" BorderBrush="Black">
-                        <TextBlock xml:space="preserve" Name="RHInfo" FontSize="60" TextAlignment="Center">RIGHT HAND</TextBlock>
+                        <TextBlock xml:space="preserve" Name="RHInfo" FontSize="30" TextAlignment="Center"></TextBlock>
                     </Border>
                     <Border BorderThickness="1" Grid.Row="2" BorderBrush="Black">
-                        <TextBlock Name="LHInfo" FontSize="60" TextAlignment="Center">LEFT HAND</TextBlock>
+                        <TextBlock Name="LHInfo" FontSize="30" TextAlignment="Center"></TextBlock>
                     </Border>
                     <Border BorderThickness="1" Grid.Row="0" BorderBrush="Black">
-                        <TextBlock Name="BodiesInFocus" Grid.Row="2" FontSize="30" TextAlignment="Center">BODIES</TextBlock>
+                        <TextBlock Name="BodiesInFocus" Grid.Row="2" FontSize="30" TextAlignment="Center"></TextBlock>
                     </Border>
 
                 </Grid>

@@ -6,6 +6,7 @@ using Microsoft.Kinect;
 using System.Collections.Generic;
 using System.Windows.Controls;
 using System.Windows.Shapes;
+using System.Timers;
 
 namespace WpfApp1Kinect
 {
@@ -18,6 +19,15 @@ namespace WpfApp1Kinect
 
         Body[] bodies = null;
 
+        Timer timer = null;
+
+        LinkedList<Gesture> gestures = new LinkedList<Gesture>();
+
+        float LastRightX, CurrentRightX= 0.0f, LastRightY, CurrentRightY = 0.0f;
+        float LastLeftX, CurrentLeftX = 0.0f, LastLeftY, CurrentLeftY = 0.0f;
+
+        readonly int ACTION_THRESHOLD_PX = 300;
+        readonly int CHECK_INTERVAL_MS = 300;
         #endregion
 
         #region Boilerplate
@@ -34,18 +44,37 @@ namespace WpfApp1Kinect
         {
             sensor = KinectSensor.GetDefault();
 
+            gestures.AddLast(new Gesture());
+
+            timer = new Timer(CHECK_INTERVAL_MS);
+            timer.Elapsed += Timer_Elapsed;
+            timer.Enabled = true;
+
             //Open sensor, if found.
             if (sensor != null)
             {
                 sensor.Open();
 
-                //Call the body reader. Every Reader must have a .FrameArrived method.
+                //We will be using BodyFrame and ColorFrame. So, best to use MultiSourceFrameReader.
                 reader = sensor.OpenMultiSourceFrameReader(FrameSourceTypes.Body | FrameSourceTypes.Color);
                 reader.MultiSourceFrameArrived += Reader_MultiSourceFrameArrived;
-                
-
-
             }
+        }
+
+        private void Timer_Elapsed(object sender, ElapsedEventArgs e)
+        {
+            float movedRX = CurrentRightX - LastRightX, movedRY = CurrentRightY - LastRightY;
+            float movedLX = CurrentLeftX - LastLeftX, movedLY = CurrentLeftY - LastLeftY;
+
+            if (Math.Abs(movedRX) > ACTION_THRESHOLD_PX || Math.Abs(movedRY) > ACTION_THRESHOLD_PX)
+                gestures.AddLast(new Gesture(LastRightX, CurrentRightX, LastRightY, CurrentRightY, CHECK_INTERVAL_MS));
+            else if (Math.Abs(movedLX) > ACTION_THRESHOLD_PX || Math.Abs(movedLY) > ACTION_THRESHOLD_PX)
+                gestures.AddLast(new Gesture(LastLeftX, CurrentLeftX, LastLeftY, CurrentLeftY, CHECK_INTERVAL_MS));
+            
+            LastRightX = CurrentRightX;
+            LastRightY = CurrentRightY;
+            LastLeftY = CurrentLeftY;
+            LastLeftX = CurrentLeftX;
         }
 
         //Performed when the window is closed
@@ -56,6 +85,8 @@ namespace WpfApp1Kinect
                 reader.Dispose();
             if (sensor != null)
                 sensor.Close();
+            if (timer != null)
+                timer.Close();
         }
         #endregion
 
@@ -91,12 +122,13 @@ namespace WpfApp1Kinect
                     bool bodyFound = false;
                     Body bodyInFocus = bodies[0];
                     float closestDepth = float.MaxValue;
-
+                    byte bodiesFound = 0;
+                    
                     foreach(Body b in bodies)
                     {
                         if (b.IsTracked)
                         {
-                            bodyFound = true;
+                            bodyFound = true; bodiesFound++;
 
                             IReadOnlyDictionary<JointType, Joint> joints = b.Joints;
 
@@ -105,35 +137,38 @@ namespace WpfApp1Kinect
                                 closestDepth = joints[JointType.SpineBase].Position.Z;
                                 bodyInFocus = b;
                             }
-                            else continue;
-                                
-                            Joint handLeft = joints[JointType.HandLeft];
-                            Joint handRight = joints[JointType.HandRight];
+                            else continue; //Ignore this body if it's not the closest
 
-                            Point lhPoint = DrawJointMarker(handLeft, 50, sensor.CoordinateMapper);
-                            Point rhPoint = DrawJointMarker(handRight, 50, sensor.CoordinateMapper);
+                            Joint handLeft = joints[JointType.HandLeft],
+                                  handRight = joints[JointType.HandRight],
+                                  thumbRight = joints[JointType.ThumbRight],
+                                  thumbLeft = joints[JointType.ThumbLeft];
 
-                            string rhs = getHandState(b.HandRightState);
-                            string lhs = getHandState(b.HandLeftState);
+                            Point lhPoint = DrawJointMarker(handLeft, 50, sensor.CoordinateMapper),
+                                  rhPoint = DrawJointMarker(handRight, 50, sensor.CoordinateMapper),
+                                  rtPoint = DrawJointMarker(thumbRight, 20, sensor.CoordinateMapper),
+                                  ltPoint = DrawJointMarker(thumbLeft, 20, sensor.CoordinateMapper);
+
+                            CurrentRightX = (float)rhPoint.X;
+                            CurrentRightY = (float)rhPoint.Y;
+
+                            CurrentLeftX = (float)lhPoint.X;
+                            CurrentLeftY = (float)lhPoint.Y;
+
+                            string rhs = getHandState(b.HandRightState),
+                                   lhs = getHandState(b.HandLeftState);
 
                             RHInfo.Text = "RIGHT HAND \n" + rhs + "\nX: " + rhPoint.X.ToString("#.##") + "\nY: " + rhPoint.Y.ToString("#.##"); //RHInfo is a XAML UIElement!
                             LHInfo.Text = "LEFT HAND  \n" + lhs + "\nX: " + lhPoint.X.ToString("#.##") + "\nY: " + lhPoint.Y.ToString("#.##");
 
-                            Joint thumbRight = joints[JointType.ThumbRight];
-                            Joint thumbLeft = joints[JointType.ThumbLeft];
-
-                            Point rtPoint = DrawJointMarker(thumbRight, 20, sensor.CoordinateMapper);
-                            Point ltPoint = DrawJointMarker(thumbLeft, 20, sensor.CoordinateMapper);
-
                             ThumbsInfo.Text = "THUMBS \n" + "R: (" + rtPoint.X.ToString("#.#") + ", " + rtPoint.Y.ToString("#.#") + ")\n" +
                                               "L: (" + ltPoint.X.ToString("#.#") + ", " + ltPoint.Y.ToString("#.#") + ")";
 
-                            BodiesInFocus.Text = "BODY ID \n" + bodyInFocus.TrackingId;
-
-                        }
+                            BodiesInFocus.Text = "TARGET ID \n" + bodyInFocus.TrackingId + "\nOther Bodies Found: " + (bodiesFound - 1) + "\nLast Action: " + gestures.Last.Value.direction;
+                        } 
                         if (!bodyFound)
                         {
-                            BodiesInFocus.Text = "BODIES \nNONE!";
+                            BodiesInFocus.Text = "TARGET ID \nNONE!";
                             RHInfo.Text = "RIGHT HAND \nNONE!";
                             LHInfo.Text = "LEFT HAND \nNONE!";
                             ThumbsInfo.Text = "THUMBS\nNONE!";
